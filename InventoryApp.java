@@ -2,141 +2,99 @@ import javax.swing.*;
 import java.awt.*;
 import java.awt.event.ActionEvent;
 import java.awt.event.ActionListener;
-import java.sql.*;
+import java.sql.Connection;
+import java.sql.DriverManager;
+import java.sql.PreparedStatement;
+import java.sql.ResultSet;
+import java.sql.SQLException;
 
-public class InventoryApp {
-    // JDBC Connection
-    private static Connection connection;
-    // Main application frame
-    private static JFrame frame;
-    // Username input field
-    private static JTextField usernameField;
-    // Password input field
-    private static JPasswordField passwordField;
-    // Text area to display inventory
-    private static JTextArea inventoryTextArea;
+public class InventoryApp extends JFrame {
+    private static final String URL = "jdbc:mysql://127.0.0.1:3306/nutracker_db";
+    private static final String USER = "root";
+    private static final String PASSWORD = "root";
 
-    public static void main(String[] args) {
-        // Database connection setup
-        try {
-            // Load the MySQL JDBC driver
-            Class.forName("com.mysql.cj.jdbc.Driver");
-            // Connect to the MySQL database
-            connection = DriverManager.getConnection(
-                    "jdbc:mysql://localhost:3306/nu_tracker_inventory", // Database URL
-                    "root", // Database username
-                    "yourpassword" // Database password
-            );
-        } catch (Exception e) {
-            e.printStackTrace();
-        }
+    private JTextField usernameField;
+    private JPasswordField passwordField;
+    private JTextArea inventoryArea;
 
-        // Initialize UI components
-        frame = new JFrame("Nu Tracker Inventory");
-        frame.setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
-        frame.setSize(400, 300);
+    public InventoryApp() {
+        setTitle("Inventory Tracking App");
+        setSize(400, 300);
+        setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
+        setLayout(new BorderLayout());
 
-        // Login panel
         JPanel loginPanel = new JPanel(new GridLayout(3, 2));
-        usernameField = new JTextField(); // Username input field
-        passwordField = new JPasswordField(); // Password input field
-        JButton loginButton = new JButton("Login"); // Login button
-
-        // Add components to login panel
-        loginPanel.add(new JLabel("Username:")); // Label for username field
+        loginPanel.add(new JLabel("Username:"));
+        usernameField = new JTextField();
         loginPanel.add(usernameField);
-        loginPanel.add(new JLabel("Password:")); // Label for password field
+
+        loginPanel.add(new JLabel("Password:"));
+        passwordField = new JPasswordField();
         loginPanel.add(passwordField);
+
+        JButton loginButton = new JButton("Login");
         loginPanel.add(loginButton);
 
-        // Add login panel to frame
-        frame.getContentPane().add(loginPanel, BorderLayout.CENTER);
-        frame.setVisible(true);
+        inventoryArea = new JTextArea();
+        inventoryArea.setEditable(false);
 
-        // Action listener for login button
+        add(loginPanel, BorderLayout.NORTH);
+        add(new JScrollPane(inventoryArea), BorderLayout.CENTER);
+
         loginButton.addActionListener(new ActionListener() {
             @Override
             public void actionPerformed(ActionEvent e) {
-                // Get username and password from input fields
                 String username = usernameField.getText();
                 String password = new String(passwordField.getPassword());
-                // Authenticate user
                 if (authenticateUser(username, password)) {
-                    // Show inventory UI if authentication is successful
-                    showInventoryUI();
+                    loadInventory();
                 } else {
-                    // Show error message if authentication fails
-                    JOptionPane.showMessageDialog(frame, "Invalid credentials", "Error", JOptionPane.ERROR_MESSAGE);
+                    JOptionPane.showMessageDialog(InventoryApp.this, "Login failed!", "Error", JOptionPane.ERROR_MESSAGE);
                 }
             }
         });
     }
 
-    // Method to authenticate user
-    private static boolean authenticateUser(String username, String password) {
-        try {
-            // SQL query to check username and password
-            String query = "SELECT * FROM users WHERE username = ? AND password = ?";
-            PreparedStatement stmt = connection.prepareStatement(query);
-            stmt.setString(1, username); // Set username parameter
-            stmt.setString(2, password); // Set password parameter
-            ResultSet rs = stmt.executeQuery();
-            return rs.next(); // Return true if a matching user is found
+    private boolean authenticateUser(String username, String password) {
+        try (Connection connection = DriverManager.getConnection(URL, USER, PASSWORD)) {
+            String query = "SELECT password, salt FROM users WHERE username = ?";
+            PreparedStatement preparedStatement = connection.prepareStatement(query);
+            preparedStatement.setString(1, username);
+            ResultSet resultSet = preparedStatement.executeQuery();
+            if (resultSet.next()) {
+                String storedHash = resultSet.getString("password");
+                String storedSalt = resultSet.getString("salt");
+                return PasswordUtils.verifyPassword(password, storedHash, storedSalt);
+            }
         } catch (SQLException e) {
             e.printStackTrace();
-            return false; // Return false if an error occurs
+        }
+        return false;
+    }
+
+    private void loadInventory() {
+        inventoryArea.setText("");
+        try (Connection connection = DriverManager.getConnection(URL, USER, PASSWORD)) {
+            String query = "SELECT * FROM inventory";
+            PreparedStatement preparedStatement = connection.prepareStatement(query);
+            ResultSet resultSet = preparedStatement.executeQuery();
+            while (resultSet.next()) {
+                inventoryArea.append("Item ID: " + resultSet.getInt("item_id") + "\n");
+                inventoryArea.append("Item Name: " + resultSet.getString("item_name") + "\n");
+                inventoryArea.append("Quantity: " + resultSet.getInt("quantity") + "\n");
+                inventoryArea.append("\n");
+            }
+        } catch (SQLException e) {
+            e.printStackTrace();
         }
     }
 
-    // Method to show inventory UI
-    private static void showInventoryUI() {
-        // Clear the main frame
-        frame.getContentPane().removeAll();
-        frame.repaint();
-
-        // Inventory panel
-        JPanel inventoryPanel = new JPanel(new BorderLayout());
-        inventoryTextArea = new JTextArea(); // Text area to display inventory
-        JButton loadInventoryButton = new JButton("Load Inventory"); // Button to load inventory
-
-        // Add components to inventory panel
-        inventoryPanel.add(new JScrollPane(inventoryTextArea), BorderLayout.CENTER);
-        inventoryPanel.add(loadInventoryButton, BorderLayout.SOUTH);
-
-        // Add inventory panel to frame
-        frame.getContentPane().add(inventoryPanel);
-        frame.revalidate();
-
-        // Action listener for load inventory button
-        loadInventoryButton.addActionListener(new ActionListener() {
+    public static void main(String[] args) {
+        SwingUtilities.invokeLater(new Runnable() {
             @Override
-            public void actionPerformed(ActionEvent e) {
-                // Load inventory when button is clicked
-                loadInventory();
+            public void run() {
+                new InventoryApp().setVisible(true);
             }
         });
-    }
-
-    // Method to load inventory
-    private static void loadInventory() {
-        try {
-            // SQL query to get all inventory items
-            String query = "SELECT * FROM inventory";
-            Statement stmt = connection.createStatement();
-            ResultSet rs = stmt.executeQuery(query);
-            StringBuilder inventoryData = new StringBuilder();
-            // Iterate through the result set and append inventory data
-            while (rs.next()) {
-                inventoryData.append("Item ID: ").append(rs.getInt("id"))
-                        .append(", Name: ").append(rs.getString("item_name"))
-                        .append(", Quantity: ").append(rs.getInt("quantity"))
-                        .append(", Location: ").append(rs.getString("location"))
-                        .append("\n");
-            }
-            // Display inventory data in text area
-            inventoryTextArea.setText(inventoryData.toString());
-        } catch (SQLException e) {
-            e.printStackTrace();
-        }
     }
 }
